@@ -170,10 +170,12 @@ impl Escrow {
         escrow_id: u64,
     ) -> (Address, Address, i128) {
         let key = EscrowId(payer, escrow_id);
-        env.storage()
+        let (stored_payer, payee, amount, _expiry): (Address, Address, i128, u64) = env
+            .storage()
             .temporary()
             .get(&key)
-            .unwrap_or_else(|| env.panic_with_error(EscrowError::EscrowNotFound))
+            .unwrap_or_else(|| env.panic_with_error(EscrowError::EscrowNotFound));
+        (stored_payer, payee, amount)
     }
 
     /// Create escrow: payer deposits ACBU, payee can claim after release
@@ -294,9 +296,6 @@ impl Escrow {
         // Re-entrancy guard
         reentrancy_guard::acquire_guard(&env);
 
-        let admin = Self::load_admin(&env).unwrap_or_else(|e| env.panic_with_error(e));
-        admin.require_auth();
-
         let key = EscrowId(payer.clone(), escrow_id);
         let (stored_payer, _payee, amount, expiry): (Address, Address, i128, u64) = env
             .storage()
@@ -308,10 +307,10 @@ impl Escrow {
             env.panic_with_error(EscrowError::PayerMismatch);
         }
 
-        let admin = Self::load_admin(&env).unwrap_or_else(|e| env.panic_with_error(e));
         if env.ledger().timestamp() > expiry {
             payer.require_auth();
         } else {
+            let admin = Self::load_admin(&env).unwrap_or_else(|e| env.panic_with_error(e));
             admin.require_auth();
         }
 
@@ -519,6 +518,11 @@ impl Escrow {
     pub fn cancel_upgrade(env: Env) {
         let admin = Self::load_admin(&env).unwrap_or_else(|e| env.panic_with_error(e));
         admin.require_auth();
+        let _wasm_hash: BytesN<32> = env
+            .storage()
+            .instance()
+            .get(&DATA_KEY.pending_upgrade)
+            .unwrap_or_else(|| env.panic_with_error(EscrowError::NoPendingUpgrade));
         env.storage().instance().remove(&DATA_KEY.pending_upgrade);
         env.storage()
             .instance()
